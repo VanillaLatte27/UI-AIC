@@ -39,6 +39,17 @@ services:
       - ui-aic-network
     restart: unless-stopped
 
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    command: tunnel --no-autoupdate run --token ${TUNNEL_TOKEN}
+    environment:
+      - TUNNEL_TOKEN=${TUNNEL_TOKEN}
+    depends_on:
+      - frontend
+    networks:
+      - ui-aic-network
+    restart: unless-stopped
+
 networks:
   ui-aic-network:
     driver: bridge

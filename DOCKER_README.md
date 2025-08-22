@@ -60,6 +60,16 @@ docker-compose logs -f frontend
   - Video streaming integration
   - Responsive design
 
+### Cloudflared Tunnel Service
+
+- **Technology**: Cloudflare Zero Trust Tunnel
+- **Features**:
+  - Secure HTTPS tunnel to the internet
+  - No need to open ports on your firewall
+  - Automatic SSL/TLS encryption
+  - DDoS protection
+  - Access from anywhere on the internet
+
 ## Configuration
 
 ### Environment Variables
@@ -75,8 +85,34 @@ ai-backend:
 
 frontend:
   environment:
-    - NEXT_PUBLIC_AI_BACKEND_URL=http://ai-backend:5000
+    - NEXT_PUBLIC_AI_BACKEND_URL=http://localhost:5001
+
+cloudflared:
+  environment:
+    - TUNNEL_TOKEN=${TUNNEL_TOKEN}
 ```
+
+#### Cloudflared Tunnel Setup
+
+1. **Create a `.env` file** in the project root:
+   ```bash
+   cp env-template.txt .env
+   ```
+
+2. **Get your tunnel token**:
+   - Go to [Cloudflare Dashboard](https://dash.cloudflare.com)
+   - Navigate to **Zero Trust** > **Networks** > **Tunnels**
+   - Create a new tunnel
+   - Copy the tunnel token
+
+3. **Configure the tunnel**:
+   - Edit the `.env` file
+   - Replace `your-cloudflare-tunnel-token-here` with your actual token
+   - The tunnel will automatically expose your frontend on a Cloudflare URL
+
+4. **Optional: Custom Domain**:
+   - If you have a custom domain, configure it in your Cloudflare tunnel settings
+   - Add `TUNNEL_HOSTNAME=your-domain.com` to your `.env` file
 
 ### Custom Configuration
 

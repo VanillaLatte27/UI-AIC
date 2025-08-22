@@ -12,6 +12,7 @@
 | **Frontend** | http://localhost:3000 | ✅ Running |
 | **AI Backend** | http://localhost:5001 | ✅ Healthy |
 | **Health Check** | http://localhost:5001/health | ✅ Responding |
+| **Cloudflared Tunnel** | `https://*.trycloudflare.com` | 🔧 Configure token |
 
 ## 🚀 Quick Commands
 
@@ -55,8 +56,16 @@ docker compose restart
 │ - Real-time UI  │             │ - Person Track  │
 └─────────────────┘             └─────────────────┘
          │                             │
-         │                             │
+         │    ┌─────────────────┐      │
+         │    │  Cloudflared    │      │
+         │    │   Tunnel       │      │
+         │    │ (Port: 443)    │      │
+         │    └─────────────────┘      │
          └───────────── Docker Network ─────────────┘
+                        │
+                        ▼
+               🌐 Internet Access
+              https://*.trycloudflare.com
 ```
 
 ## 📊 Current Container Status
@@ -93,9 +102,50 @@ ui-aic-frontend-1    ui-aic-frontend    "docker-entrypoint.s…"  frontend    Up
 
 1. **Test the Application**: Visit http://localhost:3000
 2. **Test AI Features**: Try the person tracking functionality
-3. **Monitor Logs**: Use `docker compose logs -f` to monitor activity
-4. **Customize**: Edit `docker-compose.yml` for your specific needs
-5. **Deploy**: Use this setup as a base for production deployment
+3. **Setup Cloudflared Tunnel**:
+   ```bash
+   # Copy environment template
+   cp env-template.txt .env
+
+   # Edit .env file and add your tunnel token
+   nano .env
+
+   # Restart services to apply tunnel configuration
+   docker compose down
+   docker compose up -d
+   ```
+4. **Monitor Logs**: Use `docker compose logs -f` to monitor activity
+5. **Customize**: Edit `docker-compose.yml` for your specific needs
+6. **Deploy**: Use this setup as a base for production deployment
+
+## 🌐 Cloudflared Tunnel Setup
+
+To expose your application to the internet:
+
+1. **Get Tunnel Token**:
+   - Visit [Cloudflare Dashboard](https://dash.cloudflare.com)
+   - Go to **Zero Trust** > **Networks** > **Tunnels**
+   - Create a new tunnel
+   - Copy the tunnel token
+
+2. **Configure Environment**:
+   ```bash
+   # Create .env file from template
+   cp env-template.txt .env
+
+   # Edit and add your token
+   # TUNNEL_TOKEN=your-actual-token-here
+   ```
+
+3. **Restart Services**:
+   ```bash
+   docker compose down
+   docker compose up -d
+   ```
+
+4. **Find Your URL**:
+   - Check logs: `docker compose logs cloudflared`
+   - Look for a URL like: `https://abc123.trycloudflare.com`
 
 ## 📖 Documentation
 
