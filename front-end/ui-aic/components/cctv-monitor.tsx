@@ -432,7 +432,7 @@ export function CCTVMonitor() {
                           // Tampilkan stream MJPEG dari Flask agar bounding box terlihat
                           <div key={streamKey} className="relative w-full h-full">
                             <img
-                              src={`${process.env.NEXT_PUBLIC_FLASK_BASE_URL || 'http://localhost:5000'}/video_feed?ts=${streamKey}`}
+                              src={`${process.env.NEXT_PUBLIC_FLASK_BASE_URL || 'https://backendsmart.muhammadhaggy.com'}/video_feed?ts=${streamKey}`}
                               alt="AI Detection Stream"
                               className="w-full h-full object-cover"
                             />

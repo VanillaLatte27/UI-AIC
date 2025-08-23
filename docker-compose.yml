@@ -15,11 +15,11 @@ services:
     build:
       context: ./front-end/ui-aic
       args:
-        NEXT_PUBLIC_FLASK_BASE_URL: http://backend:5001
+        NEXT_PUBLIC_FLASK_BASE_URL: https://backendsmart.muhammadhaggy.com
     container_name: ui-aic-frontend
     environment:
-      - FLASK_API_URL=http://backend:5001
-      - NEXT_PUBLIC_FLASK_BASE_URL=http://backend:5001
+      - FLASK_API_URL=https://backendsmart.muhammadhaggy.com
+      - NEXT_PUBLIC_FLASK_BASE_URL=https://backendsmart.muhammadhaggy.com
     ports:
       - "3000:3000"
     depends_on:
