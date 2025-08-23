@@ -381,7 +381,7 @@ def stop_stream():
 def restart_stream():
     """Restart video streaming with current settings"""
     global is_streaming, video_capture
-
+    
     # Stop current stream
     if is_streaming:
         is_streaming = False
@@ -389,24 +389,11 @@ def restart_stream():
             video_capture.release()
             video_capture = None
         time.sleep(0.5)  # Wait for thread to stop
-
+    
     # Start new stream
     start_video_stream()
-
+    
     return jsonify({'message': 'Video streaming restarted'})
-
-@app.route('/health')
-def health_check():
-    """Health check endpoint for Docker"""
-    global model, is_streaming
-    return jsonify({
-        'status': 'healthy',
-        'timestamp': time.time(),
-        'model_loaded': model is not None,
-        'streaming_active': is_streaming,
-        'current_target': current_target,
-        'current_video': current_video
-    })
 
 if __name__ == '__main__':
     # Load initial model
