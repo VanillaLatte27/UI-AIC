@@ -18,11 +18,11 @@ import { ref } from 'vue'
 
 const targetName = ref('')
 const currentTarget = ref('Fajar')
-const videoStreamUrl = "http://localhost:5000/video_feed"
+const videoStreamUrl = "https://backendsmart.muhammadhaggy.com/video_feed"
 
 async function changeTarget() {
   if (!targetName.value) return
-  const res = await fetch("http://localhost:5000/set_target", {
+  const res = await fetch("https://backendsmart.muhammadhaggy.com/set_target", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ name: targetName.value })

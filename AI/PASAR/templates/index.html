@@ -101,13 +101,13 @@
         createApp({
             setup() {
                 const targetName = ref(''); const currentTarget = ref('Fajar'); const loading = ref(false); const status = ref(null); const detectionCount = ref(0); const currentTime = ref('00:00'); const fps = ref(0);
-                const videoStreamUrl = "http://localhost:5000/video_feed";
+                const videoStreamUrl = "https://backendsmart.muhammadhaggy.com/video_feed";
                 let fpsCounter = 0; let fpsTimer = null;
                 async function changeTarget() {
                     if (!targetName.value.trim()) { showStatus('Nama target tidak boleh kosong', 'error'); return; }
                     loading.value = true; showStatus('Mengubah target...', 'success');
                     try {
-                        const response = await fetch("http://localhost:5000/set_target", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: targetName.value.trim() }) });
+                        const response = await fetch("https://backendsmart.muhammadhaggy.com/set_target", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: targetName.value.trim() }) });
                         const data = await response.json();
                         if (response.ok) { currentTarget.value = targetName.value.trim(); targetName.value = ''; showStatus(data.message, 'success'); detectionCount.value = 0; } else { showStatus(data.error || "Gagal mengubah target", 'error'); }
                     } catch (error) { showStatus('Error koneksi ke server', 'error'); console.error('Error:', error); } finally { loading.value = false; }
