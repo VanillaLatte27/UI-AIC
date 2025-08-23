@@ -7,6 +7,7 @@ import threading
 import time
 from pathlib import Path
 import threading
+import os
 
 app = Flask(__name__)
 CORS(app)  # Enable CORS for Vue.js frontend
@@ -398,9 +399,14 @@ def restart_stream():
 if __name__ == '__main__':
     # Load initial model
     if load_model(current_video):
+        host = 'backendsmart.muhammadhaggy.com'
+        port = 80
+        debug_env = os.environ.get('FLASK_DEBUG', 'true').lower()
+        debug = debug_env in ('1', 'true', 'yes', 'on')
+
         print("🚀 Flask app starting...")
-        print("📱 Frontend: http://localhost:5000")
-        print("🎬 Video stream: http://localhost:5000/video_feed")
+        print(f"📱 Base URL: https://{host}:{port}")
+        print(f"🎬 Video stream: https://{host}:{port}/video_feed")
         print(f"🎯 Current video: {current_video}")
         print(f"🎯 Current target: {current_target}")
         
@@ -408,6 +414,6 @@ if __name__ == '__main__':
         start_video_stream()
         
         # Run Flask app
-        app.run(host='0.0.0.0', port=5000, debug=True, threaded=True)
+        app.run(host=host, port=port, debug=debug, threaded=True)
     else:
         print("❌ Failed to load model. Exiting...")
