@@ -399,14 +399,14 @@ def restart_stream():
 if __name__ == '__main__':
     # Load initial model
     if load_model(current_video):
-        host = 'backendsmart.muhammadhaggy.com'
-        port = 80
+        host = os.environ.get('FLASK_HOST', '0.0.0.0')
+        port = int(os.environ.get('FLASK_PORT', '5001'))
         debug_env = os.environ.get('FLASK_DEBUG', 'true').lower()
         debug = debug_env in ('1', 'true', 'yes', 'on')
 
         print("🚀 Flask app starting...")
-        print(f"📱 Base URL: https://{host}:{port}")
-        print(f"🎬 Video stream: https://{host}:{port}/video_feed")
+        print(f"📱 Base URL: http://{host}:{port}")
+        print(f"🎬 Video stream: http://{host}:{port}/video_feed")
         print(f"🎯 Current video: {current_video}")
         print(f"🎯 Current target: {current_target}")
         
