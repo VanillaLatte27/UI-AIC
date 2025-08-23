@@ -7,9 +7,20 @@ import threading
 import time
 from pathlib import Path
 import threading
+import os
+import sys
+import logging
+
+# Import common metrics utilities
+sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'common'))
+from metrics import setup_flask_metrics, setup_structured_logging
 
 app = Flask(__name__)
 CORS(app)  # Enable CORS for Vue.js frontend
+
+# Setup structured logging
+logger = setup_structured_logging("ai-contoh-service", logging.INFO)
+MODEL_NAME = "contoh_yolo_v1"
 
 # Global variables
 current_target = "Fajar"
@@ -253,16 +264,27 @@ def stop_stream():
     return jsonify({'message': 'Video streaming stopped'})
 
 if __name__ == '__main__':
+    # Setup metrics
+    ai_metrics = setup_flask_metrics(app, "ai-contoh-service", MODEL_NAME)
+    app.model = None
+    
     # Load model on startup
     if load_model():
-        print("🚀 Flask app starting...")
-        print("📱 Frontend: http://localhost:5000")
-        print("🎬 Video stream: http://localhost:5000/video_feed")
+        app.model = model
+        app.is_streaming = False
+        
+        logger.info("Flask app starting", extra={
+            'service': 'contoh',
+            'model': MODEL_NAME,
+            'port': 5001
+        })
         
         # Start video streaming
         start_video_stream()
+        app.is_streaming = is_streaming
         
         # Run Flask app
         app.run(host='0.0.0.0', port=5001, debug=True, threaded=True)
     else:
-        print("❌ Failed to load model. Exiting...") 
+        logger.error("Failed to load model. Exiting...")
+        exit(1)

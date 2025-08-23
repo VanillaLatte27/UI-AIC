@@ -1,0 +1,44 @@
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+
+positions:
+  filename: /tmp/positions.yaml
+
+clients:
+  - url: http://loki:3100/loki/api/v1/push
+
+scrape_configs:
+  # AI Service Logs
+  - job_name: ai-services
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: ai-services
+          __path__: /var/log/app/*.log
+    pipeline_stages:
+      - json:
+          expressions:
+            timestamp: timestamp
+            service: service
+            level: level
+            message: message
+            module: module
+            function: function
+            camera_id: camera_id
+            model_name: model_name
+            video_type: video_type
+            latency_ms: latency_ms
+            fps: fps
+            detections_count: detections_count
+      - timestamp:
+          source: timestamp
+          format: '2006-01-02 15:04:05,000'
+      - labels:
+          service:
+          level:
+          module:
+          camera_id:
+          model_name:
+          video_type:

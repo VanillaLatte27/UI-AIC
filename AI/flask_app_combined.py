@@ -8,9 +8,22 @@ import time
 from pathlib import Path
 import threading
 import os
+import logging
+import sys
+
+# Import common metrics utilities
+sys.path.append(os.path.join(os.path.dirname(__file__), 'common'))
+from metrics import setup_flask_metrics, setup_structured_logging, timing_decorator
 
 app = Flask(__name__)
 CORS(app)  # Enable CORS for Vue.js frontend
+
+# Setup structured logging
+logger = setup_structured_logging("ai-combined-service", logging.INFO)
+
+# Global variables for metrics
+MODEL_NAME = "combined_yolo_v1"
+CURRENT_MODEL_VERSION = "1.0.0"
 
 # Base directories
 BASE_DIR = Path(__file__).resolve().parent
@@ -29,6 +42,9 @@ is_streaming = False
 stream_thread = None
 target_lock = threading.Lock()  # Thread safety for target changes
 video_lock = threading.Lock()   # Thread safety for video changes
+
+# Setup metrics after app initialization
+ai_metrics = None
 
 # Video configurations
 VIDEO_CONFIGS = {
@@ -62,7 +78,7 @@ def get_asset_dir(video_type: str) -> Path:
 
 def load_model(video_type):
     """Load YOLO model for specific video type"""
-    global model
+    global model, ai_metrics
     try:
         base_dir = get_asset_dir(video_type)
         configured = (base_dir / VIDEO_CONFIGS[video_type]["model_path"]).resolve()
@@ -75,22 +91,41 @@ def load_model(video_type):
                 model_path = candidates[0]
         if model_path.exists():
             model = YOLO(str(model_path))
-            print(f"✅ Model loaded: {model_path}")
+            logger.info(f"Model loaded successfully", extra={
+                'model_name': f"{video_type}_{MODEL_NAME}",
+                'model_path': str(model_path),
+                'video_type': video_type
+            })
+            
+            # Update model info in metrics
+            if ai_metrics:
+                ai_metrics.model_name = f"{video_type}_{MODEL_NAME}"
+                ai_metrics.set_model_info(
+                    version=CURRENT_MODEL_VERSION,
+                    model_path=str(model_path)
+                )
             
             # Print available class names
             if hasattr(model, 'names'):
-                print("📋 Available classes in model:")
+                logger.info("Model classes loaded", extra={
+                    'class_count': len(model.names),
+                    'classes': list(model.names.values())
+                })
                 for class_id, class_name in model.names.items():
                     print(f"   {class_id}: {class_name}")
             else:
-                print("⚠️ No class names found in model")
+                logger.warning("No class names found in model")
             
             return True
         else:
-            print(f"❌ Model not found: {model_path}")
+            logger.error(f"Model not found: {model_path}")
+            if ai_metrics:
+                ai_metrics.record_error("model_not_found")
             return False
     except Exception as e:
-        print(f"❌ Error loading model: {e}")
+        logger.error(f"Error loading model: {e}", extra={'video_type': video_type})
+        if ai_metrics:
+            ai_metrics.record_error("model_load_error")
         return False
 
 def get_class_id(target_name):
@@ -146,14 +181,21 @@ def generate_frames():
         target_class_id = get_class_id(current_target_safe)
         
         try:
+            # Measure inference time
+            inference_start = time.time()
+            
             # Run YOLO detection only for target class
             if target_class_id is not None:
                 results = model(frame, conf=0.25, classes=[target_class_id], verbose=False)
             else:
                 results = model(frame, conf=0.25, verbose=False)
             
+            inference_time_ms = (time.time() - inference_start) * 1000
+            
             # Process detections
             detections_found = 0
+            detection_data = []
+            
             if len(results) > 0:
                 result = results[0]
                 if result.boxes is not None and len(result.boxes) > 0:
@@ -162,13 +204,24 @@ def generate_frames():
                     
                     # Reduce debug output - only print every 30 frames
                     if frame_count % 30 == 0:
-                        print(f"📊 Frame {frame_count}: Found {len(boxes)} detections")
+                        logger.debug("Frame processed", extra={
+                            'frame_count': frame_count,
+                            'detections_count': len(boxes),
+                            'inference_ms': inference_time_ms
+                        })
                     
                     for box in boxes:
                         cls_id = int(box.cls[0].cpu().numpy())
                         cls_name = class_names[cls_id] if class_names else f"Class {cls_id}"
                         x1, y1, x2, y2 = map(int, box.xyxy[0].cpu().numpy())
                         conf = float(box.conf[0].cpu().numpy())
+                        
+                        # Add to detection data for metrics
+                        detection_data.append({
+                            'class_name': cls_name,
+                            'confidence': conf,
+                            'bbox': [x1, y1, x2, y2]
+                        })
                         
                         # Only show detection for target person
                         if str(cls_name).strip().lower() == current_target_safe.strip().lower():
@@ -181,7 +234,28 @@ def generate_frames():
                             detections_found += 1
                             # Only print detection every 10 frames to reduce spam
                             if frame_count % 10 == 0:
-                                print(f"🎯 Target '{current_target_safe}' detected with confidence: {conf:.2f}")
+                                logger.info("Target detected", extra={
+                                    'target': current_target_safe,
+                                    'confidence': conf,
+                                    'frame_count': frame_count
+                                })
+            
+            # Record metrics
+            if ai_metrics:
+                ai_metrics.record_inference(inference_time_ms, "main_camera", current_video_safe)
+                ai_metrics.record_detections(detection_data, "main_camera", current_video_safe)
+                ai_metrics.record_frame_processed("main_camera", current_video_safe)
+                
+                # Calculate and record FPS every 30 frames
+                fps_frame_count += 1
+                if fps_frame_count >= 30:
+                    current_time = time.time()
+                    elapsed = current_time - fps_start_time
+                    if elapsed > 0:
+                        fps = fps_frame_count / elapsed
+                        ai_metrics.record_fps(fps, "main_camera", current_video_safe)
+                    fps_start_time = current_time
+                    fps_frame_count = 0
             
             # Add info overlay
             current_time = video_capture.get(cv2.CAP_PROP_POS_MSEC) / 1000
@@ -200,7 +274,13 @@ def generate_frames():
                       (10, 150), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
             
         except Exception as e:
-            print(f"❌ Error processing frame {frame_count}: {e}")
+            logger.error(f"Error processing frame", extra={
+                'frame_count': frame_count,
+                'error': str(e),
+                'video_type': current_video_safe
+            })
+            if ai_metrics:
+                ai_metrics.record_error("frame_processing_error")
             # Add error message to frame
             cv2.putText(frame, f"Error: {str(e)}",
                       (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
@@ -397,23 +477,34 @@ def restart_stream():
     return jsonify({'message': 'Video streaming restarted'})
 
 if __name__ == '__main__':
+    # Setup metrics after app is configured
+    ai_metrics = setup_flask_metrics(app, "ai-combined-service", MODEL_NAME)
+    app.model = None  # Will be set by load_model
+    
     # Load initial model
     if load_model(current_video):
+        app.model = model  # Store model reference for health checks
+        app.is_streaming = False  # Will be updated by streaming functions
+        
         host = os.environ.get('FLASK_HOST', '0.0.0.0')
         port = int(os.environ.get('FLASK_PORT', '5001'))
         debug_env = os.environ.get('FLASK_DEBUG', 'true').lower()
         debug = debug_env in ('1', 'true', 'yes', 'on')
 
-        print("🚀 Flask app starting...")
-        print(f"📱 Base URL: http://{host}:{port}")
-        print(f"🎬 Video stream: http://{host}:{port}/video_feed")
-        print(f"🎯 Current video: {current_video}")
-        print(f"🎯 Current target: {current_target}")
+        logger.info("Flask app starting", extra={
+            'host': host,
+            'port': port,
+            'debug': debug,
+            'video': current_video,
+            'target': current_target
+        })
         
         # Start video streaming
         start_video_stream()
+        app.is_streaming = is_streaming
         
         # Run Flask app
         app.run(host=host, port=port, debug=debug, threaded=True)
     else:
-        print("❌ Failed to load model. Exiting...")
+        logger.error("Failed to load model. Exiting...")
+        exit(1)
