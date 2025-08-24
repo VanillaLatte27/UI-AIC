@@ -35,7 +35,7 @@ export function Dashboard() {
       name: "Fajar",
       lastSeen: "15 Agustus 2024, 14:30",
       location: "Central Market",
-      image: "/missing-person-male.png",
+      image: "/fajar.jpg",
       status: "active",
     },
     {
@@ -43,7 +43,7 @@ export function Dashboard() {
       name: "akbar",
       lastSeen: "15 Agustus 2024, 14:30",
       location: "Central Market",
-      image: "/missing-person-male.png",
+      image: "/akbar.jpg",
       status: "active",
     },
   ]
@@ -55,7 +55,7 @@ export function Dashboard() {
       description: "Blue Sedan ABC-1234",
       lastSeen: "Mar 12, 10:45",
       location: "Highway 101",
-      image: "/blue-sedan.png",
+      image: "/blue-sedan.jpg",
     },
     {
       id: 2,
@@ -63,7 +63,7 @@ export function Dashboard() {
       description: "Red Honda XYZ-5678",
       lastSeen: "Mar 10, 2:30 PM",
       location: "Shopping Mall",
-      image: "/red-motorcycle.png",
+      image: "/red-motorcycle.jpg",
     },
   ]
 
@@ -74,7 +74,7 @@ export function Dashboard() {
         <div className="container mx-auto px-4 py-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-6">
-              <h1 className="text-xl font-bold text-cyan-400">Smart Tracker</h1>
+              <img src="/logo-horizontal.png" alt="Smart Tracker" className="h-12" />
               <nav className="flex space-x-4">
                 <Button
                   variant={activeTab === "dashboard" ? "default" : "ghost"}
@@ -193,8 +193,12 @@ export function Dashboard() {
                         <Search className="h-4 w-4" />
                       </Button>
                       <Link href="/missing-person-report">
-                        <Button size="sm" variant="outline" className="border-slate-600 text-white hover:bg-slate-700">
-                          <Eye className="h-4 w-4" />
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="border-orange-600 text-orange-400 hover:bg-orange-700 hover:text-white bg-slate-800"
+                        >
+                          <Eye className="h-7 w-7 text-orange-500" />
                         </Button>
                       </Link>
                     </div>
