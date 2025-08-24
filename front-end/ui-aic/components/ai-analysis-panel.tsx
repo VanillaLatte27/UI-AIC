@@ -253,7 +253,7 @@ export function AIAnalysisPanel() {
                 <div>
                   <div className="flex justify-between text-sm mb-1">
                     <span className="text-slate-400">Accuracy</span>
-                    <span className="text-white">{aiStats.accuracy}%</span>
+                    <span className="text-white">{aiStats.accuracy.toFixed(1)}%</span>
                   </div>
                   <Progress value={aiStats.accuracy} className="h-2" />
                 </div>
