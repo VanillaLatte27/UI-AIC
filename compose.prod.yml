@@ -191,7 +191,6 @@ services:
     depends_on:
       - frontend
       - backend
-      - grafana
     command: tunnel --no-autoupdate run --token ${TUNNEL_TOKEN}
     environment:
       - TUNNEL_TOKEN=${TUNNEL_TOKEN}
