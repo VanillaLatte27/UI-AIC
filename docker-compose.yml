@@ -10,6 +10,7 @@ services:
       - FLASK_HOST=0.0.0.0
       - FLASK_PORT=5001
       - FLASK_DEBUG=false
+    restart: unless-stopped
 
   frontend:
     build:
@@ -24,6 +25,7 @@ services:
       - "3000:3000"
     depends_on:
       - backend
+    restart: unless-stopped
 
   cloudflared:
     image: cloudflare/cloudflared:latest
