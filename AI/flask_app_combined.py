@@ -71,6 +71,7 @@ stream_thread = None
 target_lock = threading.Lock()  # Thread safety for target changes
 video_lock = threading.Lock()   # Thread safety for video changes
 metrics_lock = threading.Lock()  # Thread safety for metrics reads/writes
+current_video_path = None  # Resolved path to the active video file
 
 # Metrics storage (exponential moving averages)
 metrics = {
@@ -98,6 +99,28 @@ def _inc_counter(key: str, amount: int = 1) -> None:
     with metrics_lock:
         metrics[key] = metrics.get(key, 0) + amount
         metrics['last_updated'] = time.time()
+
+# Lazy initialization for flask run import path
+app_initialized = False
+app_init_lock = threading.Lock()
+
+def initialize_runtime_if_needed() -> None:
+    global app_initialized
+    if app_initialized:
+        return
+    with app_init_lock:
+        if app_initialized:
+            return
+        try:
+            if load_model(current_video):
+                print("🚀 Runtime initialized via first request import path")
+                start_video_stream()
+                app_initialized = True
+                return
+            else:
+                print("⚠️ Runtime init: model failed to load")
+        except Exception as e:
+            print(f"❌ Runtime init error: {e}")
 
 # Video configurations
 VIDEO_CONFIGS = {
@@ -342,7 +365,7 @@ def generate_frames():
 
 def start_video_stream(video_type=None):
     """Start video streaming thread"""
-    global video_capture, is_streaming, stream_thread, current_video
+    global video_capture, is_streaming, stream_thread, current_video, current_video_path
     
     if is_streaming:
         return
@@ -364,6 +387,7 @@ def start_video_stream(video_type=None):
         print(f"❌ Video not found: {video_path}")
         return
     
+    current_video_path = str(video_path)
     video_capture = cv2.VideoCapture(str(video_path))
     if not video_capture.isOpened():
         print(f"❌ Could not open video: {video_path}")
@@ -378,6 +402,7 @@ def start_video_stream(video_type=None):
 @app.route('/metrics')
 def get_metrics():
     """Expose lightweight runtime metrics for profiling."""
+    initialize_runtime_if_needed()
     # Snapshot under lock
     with metrics_lock:
         snapshot = dict(metrics)
@@ -398,6 +423,12 @@ def get_metrics():
         except Exception:
             system = {}
 
+    stream_state = {
+        'is_streaming': is_streaming,
+        'video_opened': bool(video_capture is not None and getattr(video_capture, 'isOpened', lambda: False)()),
+        'video_path': current_video_path,
+    }
+
     config = {
         'target_fps': TARGET_FPS,
         'jpeg_quality': JPEG_QUALITY,
@@ -411,11 +442,25 @@ def get_metrics():
         'model_loaded': model is not None,
     }
 
-    return jsonify({'metrics': snapshot, 'system': system, 'config': config})
+    return jsonify({'metrics': snapshot, 'system': system, 'config': config, 'stream': stream_state})
+
+@app.route('/stream_state')
+def get_stream_state():
+    """Detailed stream state for debugging."""
+    initialize_runtime_if_needed()
+    state = {
+        'is_streaming': is_streaming,
+        'video_capture_opened': bool(video_capture is not None and getattr(video_capture, 'isOpened', lambda: False)()),
+        'current_video': current_video,
+        'current_video_path': current_video_path,
+        'model_loaded': model is not None,
+    }
+    return jsonify(state)
 
 @app.route('/')
 def index():
     """Serve Vue.js frontend"""
+    initialize_runtime_if_needed()
     return render_template('index.html', 
                          current_target=current_target,
                          current_video=current_video,
@@ -424,6 +469,7 @@ def index():
 @app.route('/video_feed')
 def video_feed():
     """Video streaming endpoint"""
+    initialize_runtime_if_needed()
     return Response(generate_frames(),
                     mimetype='multipart/x-mixed-replace; boundary=frame')
 
@@ -431,6 +477,7 @@ def video_feed():
 def set_target():
     """Change target person"""
     global current_target
+    initialize_runtime_if_needed()
     
     try:
         data = request.get_json()
@@ -456,6 +503,7 @@ def set_target():
 def set_video():
     """Change video source"""
     global current_video, current_target, is_streaming, video_capture
+    initialize_runtime_if_needed()
     
     try:
         data = request.get_json()
@@ -500,16 +548,19 @@ def set_video():
 @app.route('/get_target')
 def get_target():
     """Get current target"""
+    initialize_runtime_if_needed()
     return jsonify({'target': current_target})
 
 @app.route('/get_video')
 def get_video():
     """Get current video"""
+    initialize_runtime_if_needed()
     return jsonify({'video': current_video})
 
 @app.route('/get_available_videos')
 def get_available_videos():
     """Get list of available videos"""
+    initialize_runtime_if_needed()
     return jsonify({
         'videos': list(VIDEO_CONFIGS.keys()),
         'current_video': current_video
@@ -518,6 +569,7 @@ def get_available_videos():
 @app.route('/start_stream')
 def start_stream():
     """Start video streaming"""
+    initialize_runtime_if_needed()
     start_video_stream()
     return jsonify({'message': 'Video streaming started'})
 
@@ -525,6 +577,7 @@ def start_stream():
 def stop_stream():
     """Stop video streaming"""
     global is_streaming, video_capture
+    initialize_runtime_if_needed()
     
     is_streaming = False
     if video_capture:
@@ -537,6 +590,7 @@ def stop_stream():
 def restart_stream():
     """Restart video streaming with current settings"""
     global is_streaming, video_capture
+    initialize_runtime_if_needed()
     
     # Stop current stream
     if is_streaming:
