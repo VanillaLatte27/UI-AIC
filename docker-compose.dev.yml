@@ -9,12 +9,12 @@ services:
       - FLASK_HOST=0.0.0.0
       - FLASK_PORT=5001
       - FLASK_APP=flask_app_combined:app
-      - AIC_FPS=20
-      - AIC_JPEG_QUALITY=80
-      - AIC_RESIZE_WIDTH=640
-      - AIC_IMGSZ=640
-      - AIC_TORCH_THREADS=4
-      - AIC_OPENCV_THREADS=2
+      - AIC_FPS=10
+      - AIC_JPEG_QUALITY=70
+      - AIC_RESIZE_WIDTH=480
+      - AIC_IMGSZ=320
+      - AIC_TORCH_THREADS=6
+      - AIC_OPENCV_THREADS=1
       - AIC_DEVICE=
     command: python flask_app_combined.py
 
