@@ -8,6 +8,15 @@ import time
 from pathlib import Path
 import threading
 import os
+from time import perf_counter
+try:
+    import psutil  # Optional; used for /metrics if available
+except Exception:  # pragma: no cover
+    psutil = None
+try:
+    import torch  # Optional; used to control thread counts/device if available
+except Exception:  # pragma: no cover
+    torch = None
 
 app = Flask(__name__)
 CORS(app)  # Enable CORS for Vue.js frontend
@@ -20,6 +29,38 @@ TEMPLATE_DIR = BASE_DIR / "PASAR" / "templates"
 # Ensure Flask knows where templates live (reuse PASAR templates)
 app.template_folder = str(TEMPLATE_DIR)
 
+# Performance/config knobs (env-configurable)
+def _get_int_env(name: str, default: int) -> int:
+    try:
+        return int(os.environ.get(name, str(default)))
+    except Exception:
+        return default
+
+TARGET_FPS = _get_int_env('AIC_FPS', 25)
+JPEG_QUALITY = _get_int_env('AIC_JPEG_QUALITY', 85)
+# Resize frames before inference/stream; 0 disables resizing
+FRAME_RESIZE_WIDTH = _get_int_env('AIC_RESIZE_WIDTH', 0)
+# If set, provide imgsz to Ultralytics; 0 means default
+ULTRA_IMG_SIZE = _get_int_env('AIC_IMGSZ', 0)
+# Thread controls
+TORCH_THREADS = _get_int_env('AIC_TORCH_THREADS', 0)
+OPENCV_THREADS = _get_int_env('AIC_OPENCV_THREADS', 0)
+AIC_DEVICE = os.environ.get('AIC_DEVICE', '').strip()  # e.g., 'cpu' or 'cuda:0'
+
+# Apply thread settings early where possible
+try:
+    if OPENCV_THREADS and OPENCV_THREADS > 0:
+        cv2.setNumThreads(OPENCV_THREADS)
+except Exception:
+    pass
+try:
+    if torch is not None and TORCH_THREADS and TORCH_THREADS > 0:
+        torch.set_num_threads(TORCH_THREADS)
+        # A simple heuristic for interop threads
+        torch.set_num_interop_threads(max(1, TORCH_THREADS // 2))
+except Exception:
+    pass
+
 # Global variables
 current_target = "Fajar"
 current_video = "pasar"
@@ -29,6 +70,34 @@ is_streaming = False
 stream_thread = None
 target_lock = threading.Lock()  # Thread safety for target changes
 video_lock = threading.Lock()   # Thread safety for video changes
+metrics_lock = threading.Lock()  # Thread safety for metrics reads/writes
+
+# Metrics storage (exponential moving averages)
+metrics = {
+    'frames_total': 0,
+    'frames_encoded': 0,
+    'frames_failed': 0,
+    'detections_total': 0,
+    'loop_ms_avg': 0.0,
+    'capture_ms_avg': 0.0,
+    'infer_ms_avg': 0.0,
+    'overlay_ms_avg': 0.0,
+    'encode_ms_avg': 0.0,
+    'fps_avg': 0.0,
+    'started_at': time.time(),
+    'last_updated': time.time(),
+}
+
+def _ema_update(key: str, sample_ms: float, alpha: float = 0.9) -> None:
+    with metrics_lock:
+        prev = metrics.get(key, 0.0)
+        metrics[key] = (prev * alpha) + (sample_ms * (1.0 - alpha))
+        metrics['last_updated'] = time.time()
+
+def _inc_counter(key: str, amount: int = 1) -> None:
+    with metrics_lock:
+        metrics[key] = metrics.get(key, 0) + amount
+        metrics['last_updated'] = time.time()
 
 # Video configurations
 VIDEO_CONFIGS = {
@@ -75,6 +144,13 @@ def load_model(video_type):
                 model_path = candidates[0]
         if model_path.exists():
             model = YOLO(str(model_path))
+            # Optionally move to specific device
+            if AIC_DEVICE:
+                try:
+                    model.to(AIC_DEVICE)
+                    print(f"🖥️  Model moved to device: {AIC_DEVICE}")
+                except Exception as dev_e:
+                    print(f"⚠️ Failed to move model to {AIC_DEVICE}: {dev_e}")
             print(f"✅ Model loaded: {model_path}")
             
             # Print available class names
@@ -123,7 +199,11 @@ def generate_frames():
             last_reset_time = time.time()
             print("🔄 Frame counter reset")
         try:
+            t_loop_start = perf_counter()
+            t0 = perf_counter()
             ret, frame = video_capture.read()
+            t1 = perf_counter()
+            _ema_update('capture_ms_avg', (t1 - t0) * 1000.0)
             if not ret:
                 print("🔄 Video ended, restarting...")
                 video_capture.set(cv2.CAP_PROP_POS_FRAMES, 0)
@@ -135,6 +215,7 @@ def generate_frames():
             continue
         
         frame_count += 1
+        _inc_counter('frames_total', 1)
         
         # Get current target class ID (updated every frame) with thread safety
         with target_lock:
@@ -146,11 +227,24 @@ def generate_frames():
         target_class_id = get_class_id(current_target_safe)
         
         try:
+            # Optional resize to reduce compute
+            if FRAME_RESIZE_WIDTH and FRAME_RESIZE_WIDTH > 0:
+                h, w = frame.shape[:2]
+                if w > FRAME_RESIZE_WIDTH:
+                    new_h = int(h * (FRAME_RESIZE_WIDTH / float(w)))
+                    frame = cv2.resize(frame, (FRAME_RESIZE_WIDTH, new_h), interpolation=cv2.INTER_AREA)
+
             # Run YOLO detection only for target class
+            infer_kwargs = { 'conf': 0.25, 'verbose': False }
             if target_class_id is not None:
-                results = model(frame, conf=0.25, classes=[target_class_id], verbose=False)
-            else:
-                results = model(frame, conf=0.25, verbose=False)
+                infer_kwargs['classes'] = [target_class_id]
+            if ULTRA_IMG_SIZE and ULTRA_IMG_SIZE > 0:
+                infer_kwargs['imgsz'] = ULTRA_IMG_SIZE
+
+            t_infer_start = perf_counter()
+            results = model(frame, **infer_kwargs)
+            t_infer_end = perf_counter()
+            _ema_update('infer_ms_avg', (t_infer_end - t_infer_start) * 1000.0)
             
             # Process detections
             detections_found = 0
@@ -164,6 +258,7 @@ def generate_frames():
                     if frame_count % 30 == 0:
                         print(f"📊 Frame {frame_count}: Found {len(boxes)} detections")
                     
+                    t_overlay_start = perf_counter()
                     for box in boxes:
                         cls_id = int(box.cls[0].cpu().numpy())
                         cls_name = class_names[cls_id] if class_names else f"Class {cls_id}"
@@ -182,6 +277,9 @@ def generate_frames():
                             # Only print detection every 10 frames to reduce spam
                             if frame_count % 10 == 0:
                                 print(f"🎯 Target '{current_target_safe}' detected with confidence: {conf:.2f}")
+                    t_overlay_end = perf_counter()
+                    _ema_update('overlay_ms_avg', (t_overlay_end - t_overlay_start) * 1000.0)
+                    _inc_counter('detections_total', detections_found)
             
             # Add info overlay
             current_time = video_capture.get(cv2.CAP_PROP_POS_MSEC) / 1000
@@ -207,19 +305,38 @@ def generate_frames():
         
         # Convert frame to JPEG with timeout
         try:
-            ret, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
+            t_enc_start = perf_counter()
+            ret, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, JPEG_QUALITY])
             if ret:
                 frame_bytes = buffer.tobytes()
                 yield (b'--frame\r\n'
                        b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+                _inc_counter('frames_encoded', 1)
             else:
                 print(f"❌ Failed to encode frame {frame_count}")
+                _inc_counter('frames_failed', 1)
+            t_enc_end = perf_counter()
+            _ema_update('encode_ms_avg', (t_enc_end - t_enc_start) * 1000.0)
         except Exception as e:
             print(f"❌ Frame encoding error: {e}")
+            _inc_counter('frames_failed', 1)
         
         # Control frame rate with adaptive timing
         try:
-            time.sleep(1/25)  # Reduced to 25 FPS for stability
+            t_loop_end = perf_counter()
+            loop_ms = (t_loop_end - t_loop_start) * 1000.0
+            _ema_update('loop_ms_avg', loop_ms)
+            # Instantaneous FPS and EMA
+            loop_s = max(1e-6, (t_loop_end - t_loop_start))
+            inst_fps = 1.0 / loop_s
+            _ema_update('fps_avg', inst_fps)
+
+            # Sleep to maintain target FPS if configured
+            if TARGET_FPS and TARGET_FPS > 0:
+                target_ms = 1000.0 / float(TARGET_FPS)
+                sleep_ms = max(0.0, target_ms - loop_ms)
+                if sleep_ms > 0:
+                    time.sleep(sleep_ms / 1000.0)
         except Exception as e:
             print(f"❌ Sleep error: {e}")
 
@@ -257,6 +374,44 @@ def start_video_stream(video_type=None):
     stream_thread.daemon = True
     stream_thread.start()
     print(f"🎬 Video streaming started for {current_video}")
+
+@app.route('/metrics')
+def get_metrics():
+    """Expose lightweight runtime metrics for profiling."""
+    # Snapshot under lock
+    with metrics_lock:
+        snapshot = dict(metrics)
+
+    system = {}
+    if psutil is not None:
+        try:
+            proc = psutil.Process(os.getpid())
+            with proc.oneshot():
+                rss = proc.memory_info().rss
+                cpu = proc.cpu_percent(interval=0.0)
+                num_threads = proc.num_threads()
+            system = {
+                'process_rss_bytes': rss,
+                'process_cpu_percent': cpu,
+                'process_threads': num_threads,
+            }
+        except Exception:
+            system = {}
+
+    config = {
+        'target_fps': TARGET_FPS,
+        'jpeg_quality': JPEG_QUALITY,
+        'resize_width': FRAME_RESIZE_WIDTH,
+        'ultra_img_size': ULTRA_IMG_SIZE,
+        'torch_threads': TORCH_THREADS,
+        'opencv_threads': OPENCV_THREADS,
+        'device': AIC_DEVICE or None,
+        'current_video': current_video,
+        'current_target': current_target,
+        'model_loaded': model is not None,
+    }
+
+    return jsonify({'metrics': snapshot, 'system': system, 'config': config})
 
 @app.route('/')
 def index():
@@ -409,6 +564,8 @@ if __name__ == '__main__':
         print(f"🎬 Video stream: http://{host}:{port}/video_feed")
         print(f"🎯 Current video: {current_video}")
         print(f"🎯 Current target: {current_target}")
+        print(f"🧪 Metrics endpoint: http://{host}:{port}/metrics")
+        print(f"⚙️  Config -> FPS: {TARGET_FPS}, JPEG: {JPEG_QUALITY}, ResizeW: {FRAME_RESIZE_WIDTH}, ImgSz: {ULTRA_IMG_SIZE}, TorchThreads: {TORCH_THREADS}, OpenCVThreads: {OPENCV_THREADS}, Device: {AIC_DEVICE or 'auto'}")
         
         # Start video streaming
         start_video_stream()

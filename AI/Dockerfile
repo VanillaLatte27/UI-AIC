@@ -22,6 +22,13 @@ WORKDIR /app
 EXPOSE 5001
 ENV FLASK_HOST=0.0.0.0 \
     FLASK_PORT=5001 \
-    FLASK_DEBUG=false
+    FLASK_DEBUG=false \
+    AIC_FPS=25 \
+    AIC_JPEG_QUALITY=85 \
+    AIC_RESIZE_WIDTH=0 \
+    AIC_IMGSZ=0 \
+    AIC_TORCH_THREADS=0 \
+    AIC_OPENCV_THREADS=0 \
+    AIC_DEVICE=
 
 CMD ["python", "flask_app_combined.py"]
